@@ -1,0 +1,23 @@
+[
+  {
+    "id": "sample-1",
+    "title": "Sample YouTube Video",
+    "type": "youtube",
+    "url": "https://www.youtube.com/watch?v=3-tbPOWTMjI&list=RDqPgOjtW1dvI&index=27",
+    "createdAt": "2024-01-15T10:00:00Z"
+  },
+  {
+    "id": "sample-1",
+    "title": "Sample YouTube Video",
+    "type": "youtube",
+    "url": "https://www.youtube.com/watch?v=aNURGCBTcl8",
+    "createdAt": "2024-01-15T10:00:00Z"
+  },
+  {
+    "id": "sample-2",
+    "title": "Sample MP4 Video",
+    "type": "mp4",
+    "url": "/videos/sample.mp4",
+    "createdAt": "2024-01-14T10:00:00Z"
+  }
+]
