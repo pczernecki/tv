@@ -11,6 +11,8 @@ Vite + React alapú videólejátszó alkalmazás gyerekeknek, több videóforrá
 - **Admin mód**: Bejelentkezés után szerkeszthetők a videók
 - **Felirat támogatás**: YouTube auto-felirat + VTT fájlok MP4/HLS-hez
 - **Lejátszási lista**: Rejthető oldalsáv a videók listájával
+- **Smart merge**: Új videók automatikusan megjelennek, törölt videók nem jönnek vissza
+- **Auto-refresh**: 5 percenként frissíti a videó listát új tartalom kereséséhez
 
 ---
 
@@ -53,7 +55,7 @@ gyerkocpage/
 ### Adatfolyam
 
 ```
-videos.json (vagy localStorage) 
+videos.json + localStorage (smart merge)
        ↓
    MockAPI.getVideos()
        ↓
@@ -62,6 +64,20 @@ videos.json (vagy localStorage)
    sortByCreatedAtDesc()
        ↓
    Playlist UI + Player
+       ↓
+   5 percenként auto-refresh
+```
+
+### Smart Merge logika
+
+```
+1. Letölti videos.json-t (eredeti)
+2. Betölti localStorage-t (szerkesztett)
+3. Betölti törölt ID-kat
+4. Eredmény:
+   - localStorage videók maradnak (admin szerkesztések)
+   - Új videók videos.json-ból hozzáadódnak
+   - Törölt ID-k figyelmen kívül hagyva
 ```
 
 ### Állapotkezelés
@@ -224,17 +240,21 @@ await MockAPI.checkAuth(token)
 await MockAPI.logout()
 // Returns: { success: true }
 
-// Videók lekérése
+// Videók lekérése (smart merge-el)
 await MockAPI.getVideos()
-// Returns: Video[]
+// Returns: Video[] (merged: localStorage + új videos.json - törölt)
 
 // Videók mentése
 await MockAPI.saveVideos(videos)
 // Returns: { success: true }
 
+// Videó törlése (ID mentése, hogy ne jöjjön vissza)
+await MockAPI.deleteVideo(videoId)
+// Menti a törölt ID-t localStorage-ba
+
 // Reset eredeti videókra
 await MockAPI.resetVideos()
-// Returns: Video[]
+// Returns: Video[] (törli localStorage-t és deleted IDs-t is)
 ```
 
 ### Valódi backend-re váltás
@@ -269,6 +289,7 @@ const data = await res.json();
 | `kid_player_progress_v1` | Progress map (melyik videót hol hagyta abba) |
 | `admin_token` | Bejelentkezési token |
 | `videos_data` | Szerkesztett videó lista |
+| `videos_deleted_ids` | Törölt videó ID-k (hogy ne jöjjenek vissza merge-nél) |
 
 ---
 
@@ -394,6 +415,18 @@ const ADMIN_PASS = "Gyerkoc123";
 
 ```javascript
 const DEFAULT_KID_MODE = false;
+```
+
+### Auto-refresh intervallum
+
+```javascript
+// App.jsx tetején - alapértelmezett 5 perc
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
+
+// Más értékek:
+// 1 * 60 * 1000   = 1 perc
+// 10 * 60 * 1000  = 10 perc
+// 30 * 1000       = 30 másodperc (teszteléshez)
 ```
 
 ### Felirat nyelv változtatása

@@ -6,39 +6,80 @@ Ez a dokumentum részletesen leírja a kód felépítését, hogy egy másik fej
 
 ## Fájlstruktúra és felelősségek
 
-### `src/App.jsx` - 1293 sor
+### `src/App.jsx` - ~1390 sor
 
 **Tartalom sorrendben:**
 
 | Sorok | Tartalom |
 |-------|----------|
-| 1-8 | Import-ok és konstansok |
-| 9-28 | Konfigurációs konstansok és auth helper függvények |
-| 29-92 | **MockAPI** objektum (localStorage alapú mock backend) |
-| 94-148 | **LoginModal** komponens |
-| 150-236 | **VideoEditorModal** komponens |
-| 238-268 | Helper függvények (loadProgressMap, parseYouTubeVideoId, stb.) |
-| 271-296 | **useDisableKeyboard** hook |
-| 298-366 | **Mp4Player** komponens |
-| 368-540 | **HlsPlayer** komponens |
-| 542-688 | **YouTubePlayer** komponens |
-| 690-1293 | **App** fő komponens |
+| 1-10 | Import-ok és konstansok |
+| 11-30 | Konfigurációs konstansok (AUTO_REFRESH_INTERVAL, auth) |
+| 31-120 | **MockAPI** objektum (smart merge + deleted IDs tracking) |
+| 122-176 | **LoginModal** komponens |
+| 178-264 | **VideoEditorModal** komponens |
+| 266-296 | Helper függvények (loadProgressMap, parseYouTubeVideoId, stb.) |
+| 299-324 | **useDisableKeyboard** hook |
+| 326-394 | **Mp4Player** komponens |
+| 396-568 | **HlsPlayer** komponens |
+| 570-716 | **YouTubePlayer** komponens |
+| 718-1390 | **App** fő komponens (+ auto-refresh timer) |
 
 ---
 
 ## Kulcsfontosságú kódrészletek
 
-### 1. MockAPI - Backend absztrakció
+### 1. MockAPI - Backend absztrakció (Smart Merge)
 
 ```javascript
 const MockAPI = {
   async login(username, password) { ... },
   async checkAuth(token) { ... },
   async logout() { ... },
-  async getVideos() { ... },
+  
+  // Smart merge - összefésüli videos.json + localStorage
+  async getVideos() {
+    // 1. Letölti videos.json
+    // 2. Betölti localStorage-t
+    // 3. Betölti törölt ID-kat
+    // 4. Merge: localStorage + új videók - törölt
+  },
+  
   async saveVideos(videos) { ... },
-  async resetVideos() { ... }
+  
+  // Törölt ID tracking - hogy ne jöjjön vissza merge-nél
+  async deleteVideo(videoId) { ... },
+  
+  // Privát helper-ek
+  _getDeletedIds() { ... },
+  _saveDeletedIds(ids) { ... },
+  
+  async resetVideos() { ... }  // Törli localStorage + deleted IDs
 };
+```
+
+**Smart Merge logika:**
+```javascript
+async getVideos() {
+  const originalVideos = await fetch("/videos.json");
+  const localVideos = localStorage.getItem(VIDEOS_STORAGE_KEY);
+  const deletedIds = this._getDeletedIds();
+  
+  // Ha nincs local, eredeti - törölt
+  if (!localVideos.length) {
+    return originalVideos.filter(v => !deletedIds.includes(v.id));
+  }
+  
+  // Merge: local + (eredeti - már meglevő - törölt)
+  const localMap = new Map(localVideos.map(v => [v.id, v]));
+  const merged = [...localVideos];
+  
+  for (const orig of originalVideos) {
+    if (!localMap.has(orig.id) && !deletedIds.includes(orig.id)) {
+      merged.push(orig);  // Új videó
+    }
+  }
+  return merged;
+}
 ```
 
 **Hogyan cseréld valódi API-ra:**
@@ -383,11 +424,13 @@ if (current.type === "newtype") {
 - [ ] Admin bejelentkezés
 - [ ] Videó hozzáadása
 - [ ] Videó szerkesztése
-- [ ] Videó törlése
+- [ ] Videó törlése (nem jön vissza refresh után)
 - [ ] Felirat megjelenítése (YouTube auto)
 - [ ] Felirat megjelenítése (VTT)
 - [ ] Playlist nyitás/zárás
 - [ ] Gyerek mód (billentyű blokkolás)
+- [ ] Smart merge (új videó megjelenik videos.json-ból)
+- [ ] Auto-refresh (5 perc után frissül)
 
 ---
 
@@ -400,6 +443,32 @@ if (current.type === "newtype") {
 
 ---
 
+## Auto-refresh Timer
+
+Az alkalmazás 5 percenként automatikusan újratölti a videó listát:
+
+```javascript
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 perc
+
+// App komponensben
+useEffect(() => {
+  const interval = setInterval(() => {
+    console.log("Auto-refreshing video list...");
+    loadVideos();  // Smart merge-el tölti
+  }, AUTO_REFRESH_INTERVAL);
+
+  return () => clearInterval(interval);
+}, [loadVideos]);
+```
+
+**Működés:**
+- App indul → betölti a videókat
+- 5 perc múlva → újra betölti (smart merge)
+- Ha új videó van a videos.json-ban → megjelenik
+- Ha törölt volt → nem jön vissza
+
+---
+
 ## Verziókezelés
 
 | Verzió | Változás |
@@ -409,3 +478,4 @@ if (current.type === "newtype") {
 | 1.2 | Admin mód és videó szerkesztés |
 | 1.3 | HLS streaming támogatás |
 | 1.4 | Felirat támogatás (YouTube + VTT) |
+| 1.5 | Smart merge + Auto-refresh (5 perc) |
