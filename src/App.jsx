@@ -5,6 +5,10 @@ import "./App.css";
 const STORAGE_KEY = "kid_player_progress_v1";
 const TOKEN_KEY = "admin_token";
 const VIDEOS_STORAGE_KEY = "videos_data";
+const DELETED_IDS_KEY = "videos_deleted_ids";
+
+// Auto-refresh interval (in milliseconds) - check for new videos
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 // Gyerek mód: billentyűk tiltása
 const DEFAULT_KID_MODE = true;
@@ -55,21 +59,66 @@ const MockAPI = {
     return { success: true };
   },
 
-  // Load videos - first try localStorage, then fallback to public/videos.json
+  // Load deleted IDs from localStorage
+  _getDeletedIds() {
+    try {
+      return JSON.parse(localStorage.getItem(DELETED_IDS_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  },
+
+  // Save deleted IDs to localStorage
+  _saveDeletedIds(ids) {
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(ids));
+  },
+
+  // Load videos with smart merge:
+  // 1. Fetch original videos.json
+  // 2. Merge with localStorage edits
+  // 3. Exclude deleted IDs
+  // 4. Add new videos from json that aren't in localStorage
   async getVideos() {
     await new Promise(r => setTimeout(r, 100));
     
-    // Check localStorage first (for edited data)
+    // 1. Load original videos.json
+    let originalVideos = [];
+    try {
+      const res = await fetch("/videos.json", { cache: "no-store" });
+      originalVideos = await res.json();
+    } catch {
+      originalVideos = [];
+    }
+    
+    // 2. Load localStorage data
+    let localVideos = [];
     const stored = localStorage.getItem(VIDEOS_STORAGE_KEY);
     if (stored) {
       try {
-        return JSON.parse(stored);
+        localVideos = JSON.parse(stored);
       } catch {}
     }
     
-    // Fallback to original file
-    const res = await fetch("/videos.json", { cache: "no-store" });
-    return res.json();
+    // 3. Load deleted IDs
+    const deletedIds = this._getDeletedIds();
+    
+    // 4. If no local data, return original (minus deleted)
+    if (localVideos.length === 0) {
+      return originalVideos.filter(v => !deletedIds.includes(v.id));
+    }
+    
+    // 5. Smart merge
+    const localMap = new Map(localVideos.map(v => [v.id, v]));
+    const mergedVideos = [...localVideos];
+    
+    // Add new videos from original that don't exist in local and aren't deleted
+    for (const origVideo of originalVideos) {
+      if (!localMap.has(origVideo.id) && !deletedIds.includes(origVideo.id)) {
+        mergedVideos.push(origVideo);
+      }
+    }
+    
+    return mergedVideos;
   },
 
   // Save videos - saves to localStorage
@@ -79,9 +128,19 @@ const MockAPI = {
     return { success: true };
   },
 
+  // Delete video - also track the ID so it won't be re-merged
+  async deleteVideo(videoId) {
+    const deletedIds = this._getDeletedIds();
+    if (!deletedIds.includes(videoId)) {
+      deletedIds.push(videoId);
+      this._saveDeletedIds(deletedIds);
+    }
+  },
+
   // Reset to original (clear localStorage)
   async resetVideos() {
     localStorage.removeItem(VIDEOS_STORAGE_KEY);
+    localStorage.removeItem(DELETED_IDS_KEY);
     const res = await fetch("/videos.json", { cache: "no-store" });
     return res.json();
   }
@@ -730,6 +789,16 @@ export default function App() {
     loadVideos();
   }, [loadVideos]);
 
+  // Auto-refresh timer - periodically check for new videos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log("Auto-refreshing video list...");
+      loadVideos();
+    }, AUTO_REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [loadVideos]);
+
   // Save videos
   const saveVideos = async (newVideos) => {
     const token = getToken();
@@ -786,6 +855,9 @@ export default function App() {
     const newVideos = videos.filter(
       (v) => !(v.id === videoData.id && v.url === videoData.url)
     );
+
+    // Track deleted ID so it won't be re-merged from videos.json
+    await MockAPI.deleteVideo(videoData.id);
 
     const success = await saveVideos(newVideos);
     if (success) {
