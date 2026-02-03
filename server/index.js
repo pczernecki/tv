@@ -44,6 +44,7 @@ function requireAuth(req, res, next) {
   next();
 }
 
+
 // Login endpoint
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
