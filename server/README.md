@@ -1,9 +1,9 @@
-# Gyerkoc Video Player - Backend Server
+# Gyerkoc Video Player - Backend Server - How to deploy on a real server
 
 ## Status: NOT IN USE
 
 The frontend currently uses **MockAPI** (localStorage) for all data operations.
-This server code is ready for when you want to switch to a real backend.
+This server code is ready for use at any time - you just need to switch to the real backend - see below
 
 ## How to enable the real backend
 
@@ -53,3 +53,4 @@ Or create a `RealAPI` object that mirrors `MockAPI` structure.
 Default admin credentials (change in production!):
 - Username: `Gyerkoc`
 - Password: `Gyerkoc123`
+

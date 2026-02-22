@@ -1,18 +1,37 @@
-# Gyerkoc Video Player
+# Gyerkoc TV - Video Player - for kids or elders
 
-Vite + React alapú videólejátszó alkalmazás gyerekeknek, több videóforrás támogatásával.
+Vite + React alapú TV-szerű videólejátszó alkalmazás gyerekeknek vagy idősebbeknek, több videóforrás támogatásával.
 
-## Funkciók
+# Mi ez - röviden?
+Végtelenítve játszik le videókat - pont mint egy TV.
+Letiltható minden billentyű, így a gyerkőc (vagy idősebb felhasználó) nem lapozza el, nem "rontja el".
+
+# Milyen videókat játszik le és honnan?
+Youtube videók vagy a szerver(ek)re feltöltött videók - lehetnek vegyesen is.
+Egy egyszerű fáljban beállítható a lejátszandó videók listája és sorrendje.
+
+Az újonnan feltöltött videókat azok, akik már megnézték az előző videókat - automatikusan megkapják, lejátssza azokat.
+
+- YouTube - URL-ből (pl. https://youtube.com/watch?v=...)
+- MP4 - /videos/ mappából vagy bármilyen URL-ről
+- HLS stream - .m3u8 URL-ek
+
+# Hogyan használható? Egyetlen kattintás - és jön a TV
+Egyetlen kattintás szükséges az elején - ez nem kikerülhető mivel automata lejátszást jelenleg nem támogat egyetlen böngésző sem.
+
+## Funkciók - mit tud?
 
 - **Többféle videóforrás**: YouTube, MP4, HLS streaming
 - **Automatikus lejátszás**: Videó végén automatikusan ugrik a következőre
-- **Progress mentés**: localStorage-ban tárolja melyik videót hol hagyta abba
+- **"Hol tartott" mentés**: localStorage-ban tárolja melyik videót hol hagyta abba - újraindítás után is emlékszik az adott nézőre, hogy hol tartott, nem kell újra néznie mindent
 - **Gyerek mód**: Billentyűzet letiltása (nehogy véletlenül elnavigáljon)
-- **Admin mód**: Bejelentkezés után szerkeszthetők a videók
 - **Felirat támogatás**: YouTube auto-felirat + VTT fájlok MP4/HLS-hez
-- **Lejátszási lista**: Rejthető oldalsáv a videók listájával
 - **Smart merge**: Új videók automatikusan megjelennek, törölt videók nem jönnek vissza
 - **Auto-refresh**: 5 percenként frissíti a videó listát új tartalom kereséséhez
+- **Lejátszási lista**: Rejthető oldalsáv a videók listájával
+
+- **Admin mód**: Bejelentkezés után szerkeszthetők a videók
+
 
 ---
 
@@ -28,6 +47,23 @@ npm run dev
 # Production build
 npm run build
 ```
+
+## Backend hosting
+Bárhol hostolható! Példák:
+Szolgáltatás	Típus	              Ár
+Railway	Node.js hosting	Free tier van
+Render	       Node.js hosting	       Free tier van
+DigitalOcean	Ubuntu VPS	       $4-6/hó
+Vercel	       Serverless           Free
+Saját szerver	 Bármi	              -
+ 
+A server/ mappában lévő Express szerver bárhol futtatható:
+ 
+cd server
+npm install
+npm start
+
+Ehhez csak a frontend-ben kell egyszer átírni kb. 1 perc alatt a MockAPI hívásokat fetch-re az igazi URL-re.
 
 ---
 
@@ -473,3 +509,4 @@ Ellenőrizd:
 ## Licensz
 
 Privát projekt.
+
