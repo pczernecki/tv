@@ -73,22 +73,34 @@ const MockAPI = {
     localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(ids));
   },
 
-  // Load videos with smart merge:
+  // Load videos and settings with smart merge:
   // 1. Fetch original videos.json
   // 2. Merge with localStorage edits
   // 3. Exclude deleted IDs
   // 4. Add new videos from json that aren't in localStorage
-  async getVideos() {
+  async getVideosAndSettings() {
     await new Promise(r => setTimeout(r, 100));
     
     // 1. Load original videos.json
-    let originalVideos = [];
+    let originalData = { settings: {}, videos: [] };
     try {
       const res = await fetch("/videos.json", { cache: "no-store" });
-      originalVideos = await res.json();
+      const data = await res.json();
+      // Handle both old format (array) and new format (object with settings)
+      if (Array.isArray(data)) {
+        originalData = { settings: {}, videos: data };
+      } else {
+        originalData = { 
+          settings: data.settings || {}, 
+          videos: data.videos || [] 
+        };
+      }
     } catch {
-      originalVideos = [];
+      originalData = { settings: {}, videos: [] };
     }
+    
+    const originalVideos = originalData.videos;
+    const settings = originalData.settings;
     
     // 2. Load localStorage data
     let localVideos = [];
@@ -104,7 +116,10 @@ const MockAPI = {
     
     // 4. If no local data, return original (minus deleted)
     if (localVideos.length === 0) {
-      return originalVideos.filter(v => !deletedIds.includes(v.id));
+      return { 
+        settings, 
+        videos: originalVideos.filter(v => !deletedIds.includes(v.id)) 
+      };
     }
     
     // 5. Smart merge
@@ -118,7 +133,13 @@ const MockAPI = {
       }
     }
     
-    return mergedVideos;
+    return { settings, videos: mergedVideos };
+  },
+
+  // Legacy method for backward compatibility
+  async getVideos() {
+    const result = await this.getVideosAndSettings();
+    return result.videos;
   },
 
   // Save videos - saves to localStorage
@@ -215,9 +236,12 @@ function VideoEditorModal({ video, onSave, onDelete, onClose, isNew }) {
       type: "youtube",
       url: "",
       subtitles: "",
+      mustWatch: false,
+      protected: false,
       createdAt: new Date().toISOString(),
     }
   );
+  const [deleteConfirmCount, setDeleteConfirmCount] = useState(0);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -230,6 +254,24 @@ function VideoEditorModal({ video, onSave, onDelete, onClose, isNew }) {
     if (!data.subtitles) delete data.subtitles;
     onSave(data);
   };
+
+  const handleDelete = () => {
+    if (formData.protected) {
+      // Protected videos need 3 confirmations
+      const newCount = deleteConfirmCount + 1;
+      setDeleteConfirmCount(newCount);
+      if (newCount >= 3) {
+        onDelete(formData);
+      }
+    } else {
+      // Simple confirmation for non-protected
+      if (confirm(`Biztosan törlöd: "${formData.title}"?`)) {
+        onDelete(formData);
+      }
+    }
+  };
+
+  const remainingConfirms = 3 - deleteConfirmCount;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -273,14 +315,38 @@ function VideoEditorModal({ video, onSave, onDelete, onClose, isNew }) {
               onChange={(e) => setFormData({ ...formData, subtitles: e.target.value })}
             />
           )}
+          {/* Video flags */}
+          <div className="checkbox-row">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={formData.mustWatch || false}
+                onChange={(e) => setFormData({ ...formData, mustWatch: e.target.checked })}
+              />
+              ⭐ Must Watch - Új felhasználóknak kötelező
+            </label>
+          </div>
+          <div className="checkbox-row">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={formData.protected || false}
+                onChange={(e) => setFormData({ ...formData, protected: e.target.checked })}
+              />
+              🛡️ Védett - Törléshez 3x megerősítés
+            </label>
+          </div>
           <div className="modal-buttons">
             {!isNew && (
               <button
                 type="button"
-                onClick={() => onDelete(formData)}
+                onClick={handleDelete}
                 className="btn-danger"
               >
-                Törlés
+                {formData.protected && deleteConfirmCount > 0 
+                  ? `Törlés (${remainingConfirms} megerősítés még)`
+                  : "Törlés"
+                }
               </button>
             )}
             <button type="button" onClick={onClose} className="btn-secondary">
@@ -317,14 +383,39 @@ function parseYouTubeVideoId(url) {
   }
 }
 
+// Sort videos - respect admin order field if present, otherwise by createdAt
+function sortVideos(list) {
+  return [...list].sort((a, b) => {
+    // If both have order field, sort by order
+    if (a.order !== undefined && b.order !== undefined) {
+      return a.order - b.order;
+    }
+    // If only one has order, prioritize it
+    if (a.order !== undefined) return -1;
+    if (b.order !== undefined) return 1;
+    // Otherwise sort by createdAt descending (newest first)
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+}
+
+// Legacy alias for backward compatibility
 function sortByCreatedAtDesc(list) {
-  return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return sortVideos(list);
 }
 
 function pickNextVideo(videos, progressMap) {
-  const sorted = sortByCreatedAtDesc(videos);
+  const sorted = sortVideos(videos);
+  
+  // 1. First priority: unseen mustWatch videos
+  const unseenMustWatch = sorted.find((v) => v.mustWatch && !progressMap[v.id]?.seen);
+  if (unseenMustWatch) return unseenMustWatch;
+  
+  // 2. Second priority: any unseen video
   const unseen = sorted.find((v) => !progressMap[v.id]?.seen);
-  return unseen || sorted[0] || null;
+  if (unseen) return unseen;
+  
+  // 3. Fallback: first video in list
+  return sorted[0] || null;
 }
 
 function useDisableKeyboard(enabled) {
@@ -741,6 +832,68 @@ function YouTubePlayer({ videoId, startAt, onReady, onError, onEnded }) {
   return <div ref={containerRef} className="yt-container" />;
 }
 
+// Facebook Page Feed Component
+function FacebookFeed({ pageUrl }) {
+  const containerRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!pageUrl) return;
+    
+    // Load Facebook SDK if not already loaded
+    if (!window.FB) {
+      const script = document.createElement('script');
+      script.src = 'https://connect.facebook.net/hu_HU/sdk.js#xfbml=1&version=v18.0';
+      script.async = true;
+      script.defer = true;
+      script.crossOrigin = 'anonymous';
+      script.onload = () => {
+        setLoaded(true);
+        window.FB?.XFBML?.parse(containerRef.current);
+      };
+      document.body.appendChild(script);
+    } else {
+      setLoaded(true);
+      window.FB.XFBML.parse(containerRef.current);
+    }
+  }, [pageUrl]);
+
+  useEffect(() => {
+    if (loaded && window.FB && containerRef.current) {
+      window.FB.XFBML.parse(containerRef.current);
+    }
+  }, [loaded, pageUrl]);
+
+  if (!pageUrl) {
+    return (
+      <div className="facebook-feed-empty">
+        <p>Nincs Facebook oldal beállítva.</p>
+        <p className="hint">Add meg a JSON-ban: settings.facebookPageUrl</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="facebook-feed-container" ref={containerRef}>
+      <div 
+        className="fb-page" 
+        data-href={pageUrl}
+        data-tabs="timeline"
+        data-width="500"
+        data-height="800"
+        data-small-header="false"
+        data-adapt-container-width="true"
+        data-hide-cover="false"
+        data-show-facepile="true"
+      >
+        <blockquote cite={pageUrl} className="fb-xfbml-parse-ignore">
+          <a href={pageUrl}>Betöltés...</a>
+        </blockquote>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [videos, setVideos] = useState([]);
   const [progressMap, setProgressMap] = useState(() => loadProgressMap());
@@ -763,6 +916,10 @@ export default function App() {
   const [isNewVideo, setIsNewVideo] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // View mode: 'videos' or 'facebook'
+  const [viewMode, setViewMode] = useState('videos');
+  const [settings, setSettings] = useState({ facebookPageUrl: '' });
+
   useDisableKeyboard(kidMode && !isAdmin);
 
   // Check if already logged in
@@ -775,13 +932,15 @@ export default function App() {
     }
   }, []);
 
-  // Load videos
+  // Load videos and settings
   const loadVideos = useCallback(async () => {
     try {
-      const list = await MockAPI.getVideos();
-      setVideos(list || []);
+      const result = await MockAPI.getVideosAndSettings();
+      setVideos(result.videos || []);
+      setSettings(result.settings || {});
     } catch {
       setVideos([]);
+      setSettings({});
     }
   }, []);
 
@@ -1010,17 +1169,33 @@ export default function App() {
   const jumpToNext = useCallback(() => {
     if (sortedVideos.length === 0) return;
     
-    // Prioritize unseen videos (newest first)
-    // 1. Look for unseen video after current position
+    // Priority order:
+    // 1. Unseen mustWatch videos (anywhere in list)
+    // 2. Unseen regular videos (after current position)
+    // 3. Unseen regular videos (before current position)
+    // 4. Simple next in order
+    
     let nextVideo = null;
-    for (let i = currentIndex + 1; i < sortedVideos.length; i++) {
-      if (!progressMap[sortedVideos[i].id]?.seen) {
-        nextVideo = sortedVideos[i];
-        break;
+    
+    // 1. First check for any unseen mustWatch video
+    const unseenMustWatch = sortedVideos.find(
+      v => v.mustWatch && !progressMap[v.id]?.seen
+    );
+    if (unseenMustWatch) {
+      nextVideo = unseenMustWatch;
+    }
+    
+    // 2. If no mustWatch, look for unseen video after current position
+    if (!nextVideo) {
+      for (let i = currentIndex + 1; i < sortedVideos.length; i++) {
+        if (!progressMap[sortedVideos[i].id]?.seen) {
+          nextVideo = sortedVideos[i];
+          break;
+        }
       }
     }
     
-    // 2. If not found, look from the beginning (before current position)
+    // 3. If not found, look from the beginning (before current position)
     if (!nextVideo) {
       for (let i = 0; i < currentIndex; i++) {
         if (!progressMap[sortedVideos[i].id]?.seen) {
@@ -1030,7 +1205,7 @@ export default function App() {
       }
     }
     
-    // 3. If all are seen, just go to next in order
+    // 4. If all are seen, just go to next in order
     if (!nextVideo) {
       const nextIndex = currentIndex < sortedVideos.length - 1 ? currentIndex + 1 : 0;
       nextVideo = sortedVideos[nextIndex];
@@ -1226,16 +1401,23 @@ export default function App() {
 
       <div className={`main-content ${playlistOpen ? 'playlist-open' : ''}`}>
         <div className="stage">
-          {renderPlayer()}
+          {/* Video player or Facebook feed based on view mode */}
+          {viewMode === 'videos' ? (
+            <>
+              {renderPlayer()}
 
-          {!isPlaying && (
-            <button className="bigPlay" onClick={startPlayback}>
-              ▶
-            </button>
+              {!isPlaying && (
+                <button className="bigPlay" onClick={startPlayback}>
+                  ▶
+                </button>
+              )}
+            </>
+          ) : (
+            <FacebookFeed pageUrl={settings.facebookPageUrl} />
           )}
 
           {/* Controls for MP4 - pointer-events: none on container, auto on interactive elements */}
-          {!isYouTube && (
+          {viewMode === 'videos' && !isYouTube && (
             <div className="controls visible">
               <div className="row">
                 <button onClick={jumpToPrevious} title="Előző">⏮</button>
@@ -1272,7 +1454,7 @@ export default function App() {
           )}
 
           {/* Controls for YouTube */}
-          {isYouTube && (
+          {viewMode === 'videos' && isYouTube && (
             <div className="controls youtube-controls visible">
               <div className="row">
                 <button onClick={jumpToPrevious} title="Előző">⏮</button>
@@ -1286,6 +1468,17 @@ export default function App() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* View mode toggle button */}
+          {settings.facebookPageUrl && (
+            <button
+              className="view-toggle visible"
+              onClick={() => setViewMode(viewMode === 'videos' ? 'facebook' : 'videos')}
+              title={viewMode === 'videos' ? "Facebook feed" : "Videók"}
+            >
+              {viewMode === 'videos' ? '📘' : '🎬'}
+            </button>
           )}
 
           {/* Admin login button */}
@@ -1308,7 +1501,10 @@ export default function App() {
 
         <div className="footerHint">
           {isAdmin ? (
-            <span className="admin-badge">Admin mód aktív</span>
+            <span className="admin-badge">
+              Admin mód aktív
+              <a href="#admin" className="admin-page-link">→ Admin felület</a>
+            </span>
           ) : (
             "(Tipp: a lista frissítéséhez elég a videos.json-t módosítani és újratölteni az oldalt.)"
           )}
@@ -1358,7 +1554,11 @@ export default function App() {
                   {isActive && <div className="playing-indicator">▶</div>}
                 </div>
                 <div className="playlist-item-info">
-                  <div className="playlist-item-title">{video.title || video.id}</div>
+                  <div className="playlist-item-title">
+                    {video.mustWatch && <span className="badge-must-watch" title="Kötelező új felhasználóknak">⭐</span>}
+                    {video.protected && <span className="badge-protected" title="Védett videó">🛡️</span>}
+                    {video.title || video.id}
+                  </div>
                   <div className="playlist-item-meta">
                     <span className="playlist-item-type">{video.type.toUpperCase()}</span>
                     {isSeen && <span className="playlist-item-seen">✓ Látott</span>}
