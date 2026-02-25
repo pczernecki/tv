@@ -446,6 +446,79 @@ function useDisableKeyboard(enabled) {
   }, [enabled]);
 }
 
+// Swipe detection hook for video navigation (mobile touch + desktop scroll wheel)
+function useSwipeNavigation(onSwipeUp, onSwipeDown, enabled = true) {
+  const touchStartRef = useRef({ x: 0, y: 0 });
+  const touchEndRef = useRef({ x: 0, y: 0 });
+  const lastWheelTime = useRef(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const minSwipeDistance = 50; // Minimum swipe distance in pixels
+    const wheelThrottleMs = 500; // Throttle wheel events (prevent too fast switching)
+
+    // Mobile: Touch events
+    const handleTouchStart = (e) => {
+      touchStartRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY
+      };
+    };
+
+    const handleTouchEnd = (e) => {
+      touchEndRef.current = {
+        x: e.changedTouches[0].clientX,
+        y: e.changedTouches[0].clientY
+      };
+
+      const deltaX = touchEndRef.current.x - touchStartRef.current.x;
+      const deltaY = touchEndRef.current.y - touchStartRef.current.y;
+
+      // Check if it's a vertical swipe (more vertical than horizontal)
+      if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > minSwipeDistance) {
+        if (deltaY < 0) {
+          // Swipe up → next video
+          onSwipeUp?.();
+        } else {
+          // Swipe down → previous video
+          onSwipeDown?.();
+        }
+      }
+    };
+
+    // Desktop: Mouse wheel events
+    const handleWheel = (e) => {
+      // Throttle to prevent rapid switching
+      const now = Date.now();
+      if (now - lastWheelTime.current < wheelThrottleMs) return;
+      
+      // Only trigger if significant scroll
+      if (Math.abs(e.deltaY) < 30) return;
+
+      lastWheelTime.current = now;
+
+      if (e.deltaY > 0) {
+        // Scroll down → next video
+        onSwipeUp?.();
+      } else {
+        // Scroll up → previous video
+        onSwipeDown?.();
+      }
+    };
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+    document.addEventListener('wheel', handleWheel, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('wheel', handleWheel);
+    };
+  }, [enabled, onSwipeUp, onSwipeDown]);
+}
+
 function Mp4Player({ src, startAt, onReady, onError, onEnded, subtitles }) {
   const videoRef = useRef(null);
 
@@ -1234,6 +1307,9 @@ export default function App() {
       setDuration(0);
     }
   }, [sortedVideos, currentIndex]);
+
+  // Enable swipe navigation (swipe up = next, swipe down = previous)
+  useSwipeNavigation(jumpToNext, jumpToPrevious, viewMode === 'videos');
 
   const getVideoThumbnail = (video) => {
     if (video.type === "youtube") {
